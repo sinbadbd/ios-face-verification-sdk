@@ -1,0 +1,19 @@
+{
+  "": {
+    "swift-dependencies": "/Volumes/Sinbad/dev/iOS/BnSApp/ios-face-verification-sdk/.build/index-build/arm64-apple-macosx/debug/FaceVerificationSDK.build/primary.swiftdeps"
+  },
+  "/Volumes/Sinbad/dev/iOS/BnSApp/ios-face-verification-sdk/Sources/FaceVerificationSDK/Public/FaceVerification.swift": {
+    "dependencies": "/Volumes/Sinbad/dev/iOS/BnSApp/ios-face-verification-sdk/.build/index-build/arm64-apple-macosx/debug/FaceVerificationSDK.build/FaceVerification.d",
+    "object": "/Volumes/Sinbad/dev/iOS/BnSApp/ios-face-verification-sdk/.build/index-build/arm64-apple-macosx/debug/FaceVerificationSDK.build/FaceVerification.swift.o",
+    "swiftmodule": "/Volumes/Sinbad/dev/iOS/BnSApp/ios-face-verification-sdk/.build/index-build/arm64-apple-macosx/debug/FaceVerificationSDK.build/FaceVerification~partial.swiftmodule",
+    "swift-dependencies": "/Volumes/Sinbad/dev/iOS/BnSApp/ios-face-verification-sdk/.build/index-build/arm64-apple-macosx/debug/FaceVerificationSDK.build/FaceVerification.swiftdeps",
+    "diagnostics": "/Volumes/Sinbad/dev/iOS/BnSApp/ios-face-verification-sdk/.build/index-build/arm64-apple-macosx/debug/FaceVerificationSDK.build/FaceVerification.dia"
+  },
+  "/Volumes/Sinbad/dev/iOS/BnSApp/ios-face-verification-sdk/Sources/FaceVerificationSDK/Public/FaceVerificationConfig.swift": {
+    "dependencies": "/Volumes/Sinbad/dev/iOS/BnSApp/ios-face-verification-sdk/.build/index-build/arm64-apple-macosx/debug/FaceVerificationSDK.build/FaceVerificationConfig.d",
+    "object": "/Volumes/Sinbad/dev/iOS/BnSApp/ios-face-verification-sdk/.build/index-build/arm64-apple-macosx/debug/FaceVerificationSDK.build/FaceVerificationConfig.swift.o",
+    "swiftmodule": "/Volumes/Sinbad/dev/iOS/BnSApp/ios-face-verification-sdk/.build/index-build/arm64-apple-macosx/debug/FaceVerificationSDK.build/FaceVerificationConfig~partial.swiftmodule",
+    "swift-dependencies": "/Volumes/Sinbad/dev/iOS/BnSApp/ios-face-verification-sdk/.build/index-build/arm64-apple-macosx/debug/FaceVerificationSDK.build/FaceVerificationConfig.swiftdeps",
+    "diagnostics": "/Volumes/Sinbad/dev/iOS/BnSApp/ios-face-verification-sdk/.build/index-build/arm64-apple-macosx/debug/FaceVerificationSDK.build/FaceVerificationConfig.dia"
+  }
+}
