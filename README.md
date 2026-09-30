@@ -7,6 +7,7 @@ The screen moves through four states:
 | State | What the user sees |
 | --- | --- |
 | Positioning | Live camera in a circle, "Position your face to fit the frame", plus a live hint such as "Move closer" |
+| Liveness steps (optional) | One prompt at a time, such as "Turn your head left", with an arrow on the circle and "Step 2 of 5" |
 | Processing | The captured photo inside a spinning green dashed ring |
 | Success | The photo with a green ring, a check badge and a **Continue** button |
 | Failure | A dark circle with a red ring, a warning badge and a **Try again** button |
@@ -88,7 +89,7 @@ Pass `verify` to decide success yourself, for example by calling your backend or
 
 ```swift
 var config = FaceVerificationConfig()
-config.requireBlink = true
+config.challenges = [.turnLeft, .turnRight, .lookUp, .lookDown, .blink]
 
 FaceVerification.present(
     from: self,
@@ -104,12 +105,16 @@ To embed the screen in your own navigation instead of presenting it, use `FaceVe
 
 ## How the flow works
 
-The SDK captures a photo only after one face has stayed correctly placed for 1 second, and any failure lets the user try again.
+The SDK captures a photo only after one face has stayed correctly placed for 1 second and has passed any liveness steps, and any failure lets the user try again.
 
 ```mermaid
 stateDiagram-v2
     direction LR
-    Positioning --> Processing: face held 1 s (+ blink)
+    Positioning --> Processing: face held 1 s (no liveness steps)
+    Positioning --> LivenessSteps: face held 1 s
+    LivenessSteps --> Processing: all steps done, face centered 1 s
+    LivenessSteps --> Positioning: face lost or second face
+    LivenessSteps --> Failure: step not done in time
     Positioning --> Failure: timeout or no camera
     Processing --> Success: accepted, or no verify
     Processing --> Failure: rejected or error
@@ -125,9 +130,27 @@ While positioning, each camera frame is checked in this order. The first check t
 2. The face is 35–85% of the circle's width: "Move closer" or "Move back a little"
 3. The face is near the circle's center: "Center your face in the circle"
 4. The head is tilted or turned less than about 20°: "Look straight at the camera"
-5. If `requireBlink` is on, the user has blinked once: "Blink your eyes"
 
-When every check passes, the ring turns green and the hint says "Hold still". After `stabilityDuration` (1 s), the SDK keeps the sharpest frame it saw, with eyes open, and moves to Processing. If a check fails during the hold, the timer restarts. If the face leaves the frame, the blink check restarts too, so a different face can't reuse an earlier blink.
+When every check passes, the ring turns green and the hint says "Hold still". If a check fails during the hold, the timer restarts. After `stabilityDuration` (1 s), the SDK moves on to the liveness steps, or straight to Processing if there are none.
+
+### Liveness steps
+
+Liveness steps prove a real person is in front of the camera. They run one after another, in the order you list them in `challenges`:
+
+| Step | Prompt | Passes when |
+| --- | --- | --- |
+| `.turnLeft` | Turn your head left | Head turns about 20° to the user's left |
+| `.turnRight` | Turn your head right | Head turns about 20° to the user's right |
+| `.lookUp` | Look up | Head tilts about 15° up |
+| `.lookDown` | Look down | Head tilts about 15° down |
+| `.blink` | Blink your eyes | Eyes close and reopen |
+
+- An arrow on the circle points the way to turn, and the ring fills as steps are completed.
+- After each step, the head must come back near center before the next step counts, so one diagonal pose can't pass two steps.
+- If the face leaves the frame or a second face appears, the scan starts over from Positioning, so a different person can't finish someone else's steps.
+- Each step has `challengeTimeout` (8 s). Missing it shows the failure screen with `.livenessFailed`.
+
+After the last step, the user looks straight at the camera again and holds still for 1 s. The photo is captured from these centered frames, so it is never a turned face. The SDK keeps the sharpest frame with eyes open.
 
 In Processing, the SDK calls your `verify` closure with the photo. Without one, it goes straight to Success. Processing shows for at least `minimumProcessingDuration` (0.8 s).
 
@@ -139,7 +162,10 @@ Everything is set on `FaceVerificationConfig`; every value has a default, so cha
 
 | Property | Default | What it does |
 | --- | --- | --- |
-| `requireBlink` | `false` | User must blink once before capture (simple liveness check) |
+| `challenges` | `[]` (none) | Liveness steps to run, in this order. See [Liveness steps](#liveness-steps) |
+| `challengeTimeout` | `8` s | Time allowed for each liveness step before failing with `.livenessFailed` |
+| `requireBlink` | `false` | Shorthand for adding `.blink` to `challenges` |
+| `showsDebugInfo` | `false` | Shows head angles and eye openness on screen, for tuning on a device |
 | `timeout` | `30` s | Time allowed to position the face before failing with `.timeout` |
 | `stabilityDuration` | `1.0` s | How long the face must stay correctly placed before capture |
 | `minimumProcessingDuration` | `0.8` s | Shortest time "Processing" is shown, so it doesn't just flash |
@@ -161,7 +187,11 @@ Everything is set on `FaceVerificationConfig`; every value has a default, so cha
 | `hintMoveCloser` / `hintMoveBack` | Move closer / Move back a little |
 | `hintCenterFace` | Center your face in the circle |
 | `hintLookStraight` | Look straight at the camera |
-| `hintBlink` / `hintReady` | Blink your eyes / Hold still |
+| `hintReady` | Hold still |
+| `challengeTurnLeft` / `challengeTurnRight` | Turn your head left / Turn your head right |
+| `challengeLookUp` / `challengeLookDown` | Look up / Look down |
+| `challengeBlink` | Blink your eyes |
+| `challengeStepFormat` | Step %d of %d |
 
 Line breaks (`\n`) in the titles are kept, so you control how they wrap.
 
@@ -204,6 +234,7 @@ On the failure screen the user can tap **Try again** as many times as they like;
 | `.cameraPermissionDenied` | User refused camera access. The screen shows **Open Settings**. | Ask the user to allow the camera in Settings |
 | `.cameraUnavailable` | No usable camera (e.g. the simulator) | Run on a real device |
 | `.timeout` | No well-placed face within `timeout` seconds | Let the user retry; consider a longer timeout |
+| `.livenessFailed` | A liveness step wasn't done within `challengeTimeout` | Let the user retry; consider a longer step time |
 | `.rejected` | Your `verify` closure returned `false` | Treat as a failed match |
 | `.verificationFailed(Error)` | Your `verify` closure threw | Inspect the wrapped error, e.g. a network failure |
 
@@ -223,13 +254,14 @@ The repo includes a demo app in `Example/` for trying every outcome on a real iP
 
 | Demo option | What it tests |
 | --- | --- |
-| Require blink (liveness) | The blink check before capture |
+| Liveness steps: Turn left / Turn right / Look up / Look down / Blink | Which steps run (all on by default), in the order shown |
+| Time per step (3–20 s) | The `.livenessFailed` failure |
+| Show debug info (head angles) | Live yaw, pitch, roll and eye values under the circle |
 | Verification: Capture only | Success as soon as a good photo is captured |
 | Verification: Verify → accept / reject / throw error | Success, `.rejected` and `.verificationFailed` |
 | Verify delay (0–5 s) | How long the Processing ring shows |
 | Timeout (5–60 s) | The `.timeout` failure |
 | Custom theme & strings | Changed title, button text and colors |
-| Start (SwiftUI modifier) / Start (UIKit present) | Both ways of opening the screen |
 
 **Last result** shows what the completion received, and the captured photo on success.
 
@@ -245,6 +277,8 @@ The project is generated from `Example/project.yml` with XcodeGen. After editing
 | Hint stays on "Move closer" or "Center your face" | The face must fill roughly 35–85% of the circle's width and sit near its center |
 | Hint stays on "Look straight at the camera" | Head is tilted or turned more than about 20° |
 | Blink is not detected | Blink fully and reopen your eyes; good, even lighting helps |
+| A turn or tilt step never passes | Turn further, then check `showsDebugInfo`: the angle must pass about 20° (turn) or 15° (tilt) |
+| Left and right (or up and down) are swapped | Flip the sign in `ChallengeTracker.userLeftYawSign` or `lookUpPitchSign` |
 | Does the SDK upload the photo? | No. The photo only goes to your `verify` closure and completion |
-| Does it stop printed photos or screens? | Only partly. The blink check blocks a still photo, but not a video replay. For stronger anti-spoofing, add a server-side liveness check in `verify` |
+| Does it stop printed photos or screens? | Liveness steps block a printed photo, which can't turn or blink. A video that plays the same moves in the same order could still pass. For stronger anti-spoofing, add a server-side liveness check in `verify` |
 | Can I use it in landscape or on iPad? | Not yet; the screen is designed for iPhone in portrait |

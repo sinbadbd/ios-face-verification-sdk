@@ -66,6 +66,13 @@ struct VerificationScreen: View {
                 .foregroundColor(theme.textSecondary)
                 .multilineTextAlignment(.center)
                 .opacity(hint == nil ? 0 : 1)
+
+            if let debugText = viewModel.debugText {
+                Text(debugText)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(theme.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .padding(.horizontal, 24)
         .padding(.top, 24)
@@ -100,6 +107,7 @@ struct VerificationScreen: View {
     private var title: String {
         switch viewModel.state {
         case .positioning: return strings.positionFace
+        case .challenge(let challenge, _, _): return strings.text(for: challenge)
         case .processing: return strings.processing
         case .success: return strings.success
         case .failure(.cameraPermissionDenied): return strings.cameraPermissionDenied
@@ -108,8 +116,14 @@ struct VerificationScreen: View {
     }
 
     private var hint: String? {
-        guard case .positioning(let hint) = viewModel.state else { return nil }
-        return strings.text(for: hint)
+        switch viewModel.state {
+        case .positioning(let hint):
+            return strings.text(for: hint)
+        case .challenge(_, let step, let total):
+            return String(format: strings.challengeStepFormat, step, total)
+        case .processing, .success, .failure:
+            return nil
+        }
     }
 
     private var buttonTitle: String? {
@@ -117,7 +131,7 @@ struct VerificationScreen: View {
         case .success: return strings.continueButton
         case .failure(.cameraPermissionDenied): return strings.openSettingsButton
         case .failure: return strings.tryAgainButton
-        case .positioning, .processing: return nil
+        case .positioning, .challenge, .processing: return nil
         }
     }
 }
@@ -142,6 +156,7 @@ private func previewScreen(_ state: VerificationViewModel.State) -> some View {
 }
 
 #Preview("Positioning") { previewScreen(.positioning(.centerFace)) }
+#Preview("Challenge") { previewScreen(.challenge(.turnLeft, step: 2, total: 5)) }
 #Preview("Processing") { previewScreen(.processing) }
 #Preview("Success") { previewScreen(.success) }
 #Preview("Failure") { previewScreen(.failure(.rejected)) }

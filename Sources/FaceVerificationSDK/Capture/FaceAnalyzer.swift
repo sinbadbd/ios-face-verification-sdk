@@ -40,6 +40,7 @@ final class FaceAnalyzer {
                 boundingBox: face.boundingBox,
                 roll: face.roll?.doubleValue,
                 yaw: face.yaw?.doubleValue,
+                pitch: face.pitch?.doubleValue,
                 captureQuality: Self.nearest(to: face, in: qualityObservations)?.faceCaptureQuality,
                 eyeOpenness: Self.nearest(to: face, in: landmarkObservations).flatMap(Self.eyeOpenness)
             )

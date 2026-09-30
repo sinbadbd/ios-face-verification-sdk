@@ -5,13 +5,24 @@ import UIKit
 final class VerificationViewModel: ObservableObject {
     enum State: Equatable {
         case positioning(FaceHint)
+        /// A liveness prompt; `step` is 1-based.
+        case challenge(LivenessChallenge, step: Int, total: Int)
         case processing
         case success
         case failure(FaceVerificationError)
     }
 
+    /// Scanning runs positioning → each challenge in order → a final centered hold that captures the photo.
+    private enum Phase {
+        case positioning
+        case challenges
+        case final
+    }
+
     @Published private(set) var state: State
     @Published private(set) var capturedImage: UIImage?
+    /// Head angles and eye openness of the last frame, when `showsDebugInfo` is on.
+    @Published private(set) var debugText: String?
 
     let config: FaceVerificationConfig
     var captureSession: AVCaptureSession? { camera.captureSession }
@@ -21,8 +32,11 @@ final class VerificationViewModel: ObservableObject {
     private let onFinish: (FaceVerificationResult) -> Void
     private let evaluator = FaceQualityEvaluator()
 
-    private var blink = BlinkDetector()
+    private var phase = Phase.positioning
+    private var tracker: ChallengeTracker
+    private var eyes = BlinkDetector()
     private var startedAt: TimeInterval?
+    private var phaseStartedAt: TimeInterval?
     private var stableSince: TimeInterval?
     private var best: (image: UIImage, quality: Float)?
     private var processingTask: Task<Void, Never>?
@@ -40,6 +54,7 @@ final class VerificationViewModel: ObservableObject {
         self.verify = verify
         self.onFinish = onFinish
         self.state = initialState
+        self.tracker = ChallengeTracker(challenges: config.effectiveChallenges)
 
         camera.onFrame = { [weak self] analysis, time, makeImage in
             self?.process(analysis, at: time, makeImage: makeImage)
@@ -77,7 +92,7 @@ final class VerificationViewModel: ObservableObject {
             }
         case .failure:
             retry()
-        case .positioning, .processing:
+        case .positioning, .challenge, .processing:
             break
         }
     }
@@ -93,7 +108,7 @@ final class VerificationViewModel: ObservableObject {
 
     func retry() {
         processingTask?.cancel()
-        resetCapture()
+        restartScan()
         capturedImage = nil
         startedAt = nil
         state = .positioning(.noFace)
@@ -103,46 +118,94 @@ final class VerificationViewModel: ObservableObject {
     // MARK: - Frame processing
 
     func process(_ frame: FrameAnalysis, at time: TimeInterval, makeImage: () -> UIImage?) {
-        guard case .positioning = state else { return }
-
+        switch state {
+        case .positioning, .challenge: break
+        case .processing, .success, .failure: return
+        }
+        if config.showsDebugInfo { debugText = Self.debugDescription(of: frame) }
         if startedAt == nil { startedAt = time }
-        if let startedAt, time - startedAt > config.timeout {
-            fail(.timeout)
-            return
-        }
 
-        let hint = evaluator.evaluate(frame)
-        guard hint == .ready, let face = frame.faces.first else {
-            // A different face may appear after losing the face, so liveness must restart.
-            if hint == .noFace || hint == .multipleFaces { blink.reset() }
-            resetCapture(keepBlink: true)
-            state = .positioning(hint)
-            return
-        }
+        switch phase {
+        case .positioning:
+            if let startedAt, time - startedAt > config.timeout {
+                fail(.timeout)
+                return
+            }
+            guard holdStill(frame, at: time, makeImage: makeImage) else { return }
+            if tracker.isComplete {
+                captureBest()
+            } else {
+                phase = .challenges
+                phaseStartedAt = time
+                publishChallenge()
+            }
 
-        if config.requireBlink { blink.update(openness: face.eyeOpenness) }
-        let eyesOpen = !config.requireBlink || !blink.eyesClosed
-        let quality = face.captureQuality ?? 0
-        if eyesOpen, best == nil || quality > best!.quality, let image = makeImage() {
-            best = (image, quality)
-        }
+        case .challenges:
+            // A lost or second face may be a different person: start over.
+            guard frame.faces.count == 1, let face = frame.faces.first else {
+                restartScan(at: time)
+                state = .positioning(evaluator.evaluate(frame))
+                return
+            }
+            if tracker.update(face) { phaseStartedAt = time }
+            if tracker.isComplete {
+                phase = .final
+                phaseStartedAt = time
+                resetHold()
+                state = .positioning(.lookStraight)
+                return
+            }
+            if let phaseStartedAt, time - phaseStartedAt > config.challengeTimeout {
+                fail(.livenessFailed)
+                return
+            }
+            publishChallenge()
 
-        if stableSince == nil { stableSince = time }
-
-        if config.requireBlink, !blink.hasBlinked {
-            state = .positioning(.blink)
-            return
-        }
-        state = .positioning(.ready)
-
-        if let stableSince, time - stableSince >= config.stabilityDuration, let best {
-            capture(best.image)
+        case .final:
+            if frame.faces.count != 1 {
+                restartScan(at: time)
+                state = .positioning(evaluator.evaluate(frame))
+                return
+            }
+            if let phaseStartedAt, time - phaseStartedAt > config.challengeTimeout {
+                fail(.livenessFailed)
+                return
+            }
+            if holdStill(frame, at: time, makeImage: makeImage) { captureBest() }
         }
     }
 
     // MARK: - Private
 
-    private func capture(_ image: UIImage) {
+    /// Tracks the face being well placed; keeps the sharpest eyes-open frame.
+    /// Returns `true` once it has been held for `stabilityDuration`.
+    private func holdStill(_ frame: FrameAnalysis, at time: TimeInterval, makeImage: () -> UIImage?) -> Bool {
+        let hint = evaluator.evaluate(frame)
+        guard hint == .ready, let face = frame.faces.first else {
+            resetHold()
+            state = .positioning(hint)
+            return false
+        }
+
+        eyes.update(openness: face.eyeOpenness)
+        let quality = face.captureQuality ?? 0
+        if !eyes.eyesClosed, best == nil || quality > best!.quality, let image = makeImage() {
+            best = (image, quality)
+        }
+        if stableSince == nil { stableSince = time }
+        state = .positioning(.ready)
+
+        guard let stableSince, time - stableSince >= config.stabilityDuration, best != nil else { return false }
+        return true
+    }
+
+    private func publishChallenge() {
+        guard let challenge = tracker.current else { return }
+        state = .challenge(challenge, step: tracker.index + 1, total: tracker.challenges.count)
+    }
+
+    private func captureBest() {
+        guard let image = best?.image else { return }
         camera.stop()
         capturedImage = image
         state = .processing
@@ -170,14 +233,23 @@ final class VerificationViewModel: ObservableObject {
 
     private func fail(_ error: FaceVerificationError) {
         camera.stop()
-        resetCapture()
+        restartScan()
         state = .failure(error)
     }
 
-    private func resetCapture(keepBlink: Bool = false) {
+    /// Back to the first phase. `time` restarts the positioning timeout.
+    private func restartScan(at time: TimeInterval? = nil) {
+        phase = .positioning
+        phaseStartedAt = nil
+        tracker.reset()
+        eyes.reset()
+        resetHold()
+        if let time { startedAt = time }
+    }
+
+    private func resetHold() {
         stableSince = nil
         best = nil
-        if !keepBlink { blink.reset() }
     }
 
     private func finish(_ result: FaceVerificationResult) {
@@ -186,5 +258,14 @@ final class VerificationViewModel: ObservableObject {
         processingTask?.cancel()
         camera.stop()
         onFinish(result)
+    }
+
+    private static func debugDescription(of frame: FrameAnalysis) -> String {
+        guard let face = frame.faces.first else { return "faces: 0" }
+        func deg(_ radians: Double?) -> String {
+            radians.map { String(format: "%.0f°", $0 * 180 / .pi) } ?? "–"
+        }
+        let eyes = face.eyeOpenness.map { String(format: "%.2f", $0) } ?? "–"
+        return "faces: \(frame.faces.count)  yaw: \(deg(face.yaw))  pitch: \(deg(face.pitch))  roll: \(deg(face.roll))  eyes: \(eyes)"
     }
 }

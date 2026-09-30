@@ -1,6 +1,5 @@
 import FaceVerificationSDK
 import SwiftUI
-import UIKit
 
 /// How the demo's `verify` closure behaves, to exercise every SDK outcome.
 enum VerificationMode: String, CaseIterable, Identifiable {
@@ -12,26 +11,51 @@ enum VerificationMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+extension LivenessChallenge {
+    var title: String {
+        switch self {
+        case .turnLeft: return "Turn left"
+        case .turnRight: return "Turn right"
+        case .lookUp: return "Look up"
+        case .lookDown: return "Look down"
+        case .blink: return "Blink"
+        }
+    }
+}
+
 struct DemoError: LocalizedError {
     var errorDescription: String? { "Simulated verification error" }
 }
 
 struct ContentView: View {
-    @State private var requireBlink = false
+    /// Liveness prompts to run, in `LivenessChallenge.allCases` order.
+    @State private var challenges = Set(LivenessChallenge.allCases)
+    @State private var challengeTimeout = 8.0
+    @State private var showsDebugInfo = false
     @State private var mode = VerificationMode.accept
     @State private var verifyDelay = 1.5
     @State private var timeout = 30.0
     @State private var customTheme = false
 
-    @State private var showSwiftUIFlow = false
+    @State private var showVerification = false
     @State private var resultText = "No result yet"
     @State private var resultImage: UIImage?
 
     var body: some View {
         NavigationView {
             Form {
+                Section {
+                    ForEach(LivenessChallenge.allCases, id: \.self) { challenge in
+                        Toggle(challenge.title, isOn: binding(for: challenge))
+                    }
+                    Stepper("Time per step: \(Int(challengeTimeout))s", value: $challengeTimeout, in: 3...20)
+                } header: {
+                    Text("Liveness steps")
+                } footer: {
+                    Text("Selected steps run one after another, in the order shown.")
+                }
+
                 Section("Options") {
-                    Toggle("Require blink (liveness)", isOn: $requireBlink)
                     Picker("Verification", selection: $mode) {
                         ForEach(VerificationMode.allCases) { Text($0.rawValue).tag($0) }
                     }
@@ -40,11 +64,11 @@ struct ContentView: View {
                     }
                     Stepper("Timeout: \(Int(timeout))s", value: $timeout, in: 5...60, step: 5)
                     Toggle("Custom theme & strings", isOn: $customTheme)
+                    Toggle("Show debug info (head angles)", isOn: $showsDebugInfo)
                 }
 
-                Section("Launch") {
-                    Button("Start (SwiftUI modifier)") { showSwiftUIFlow = true }
-                    Button("Start (UIKit present)", action: presentUIKit)
+                Section {
+                    Button("Start face verification") { showVerification = true }
                 }
 
                 Section("Last result") {
@@ -69,14 +93,16 @@ struct ContentView: View {
             .navigationTitle("Face Verification")
         }
         .navigationViewStyle(.stack)
-        .faceVerification(isPresented: $showSwiftUIFlow, config: config, verify: verifier, completion: handle)
+        .faceVerification(isPresented: $showVerification, config: config, verify: verifier, completion: handle)
     }
 
     // MARK: - SDK setup
 
     private var config: FaceVerificationConfig {
         var config = FaceVerificationConfig()
-        config.requireBlink = requireBlink
+        config.challenges = LivenessChallenge.allCases.filter(challenges.contains)
+        config.challengeTimeout = challengeTimeout
+        config.showsDebugInfo = showsDebugInfo
         config.timeout = timeout
         if customTheme {
             config.strings.navigationTitle = "Verify identity"
@@ -85,6 +111,15 @@ struct ContentView: View {
             config.theme.success = Color(red: 0.16, green: 0.36, blue: 0.95)
         }
         return config
+    }
+
+    private func binding(for challenge: LivenessChallenge) -> Binding<Bool> {
+        Binding(
+            get: { challenges.contains(challenge) },
+            set: { isOn in
+                if isOn { challenges.insert(challenge) } else { challenges.remove(challenge) }
+            }
+        )
     }
 
     private var verifier: FaceVerifier? {
@@ -105,11 +140,6 @@ struct ContentView: View {
         try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
     }
 
-    private func presentUIKit() {
-        guard let presenter = Self.topViewController() else { return }
-        FaceVerification.present(from: presenter, config: config, verify: verifier, completion: handle)
-    }
-
     private func handle(_ result: FaceVerificationResult) {
         switch result {
         case .success(let image):
@@ -122,12 +152,5 @@ struct ContentView: View {
             resultText = "↩️ cancelled"
             resultImage = nil
         }
-    }
-
-    private static func topViewController() -> UIViewController? {
-        let scene = UIApplication.shared.connectedScenes.first { $0.activationState == .foregroundActive } as? UIWindowScene
-        var top = scene?.windows.first { $0.isKeyWindow }?.rootViewController
-        while let presented = top?.presentedViewController { top = presented }
-        return top
     }
 }

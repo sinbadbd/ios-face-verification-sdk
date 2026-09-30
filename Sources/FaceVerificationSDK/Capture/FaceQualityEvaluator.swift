@@ -8,7 +8,6 @@ public enum FaceHint: Equatable {
     case moveBack
     case centerFace
     case lookStraight
-    case blink
     case ready
 }
 
@@ -19,6 +18,7 @@ struct FaceObservation: Equatable {
     /// Radians. `nil` when Vision could not estimate it.
     var roll: Double?
     var yaw: Double?
+    var pitch: Double?
     /// Vision capture quality (0...1), used to pick the best frame.
     var captureQuality: Float?
     /// Eye height / width ratio averaged over both eyes. Only set when landmarks are detected.
@@ -41,7 +41,7 @@ struct FaceQualityEvaluator {
     /// Face width as a fraction of the circle diameter.
     var minFaceWidth: CGFloat = 0.35
     var maxFaceWidth: CGFloat = 0.85
-    /// Max roll / yaw in radians (~20°).
+    /// Max roll / yaw / pitch in radians (~20°).
     var maxAngle: Double = 0.35
 
     func evaluate(_ frame: FrameAnalysis) -> FaceHint {
@@ -63,7 +63,7 @@ struct FaceQualityEvaluator {
         let offset = (dx * dx + dy * dy).squareRoot() / (diameter / 2)
         if offset > maxCenterOffset { return .centerFace }
 
-        if abs(face.roll ?? 0) > maxAngle || abs(face.yaw ?? 0) > maxAngle { return .lookStraight }
+        if abs(face.roll ?? 0) > maxAngle || abs(face.yaw ?? 0) > maxAngle || abs(face.pitch ?? 0) > maxAngle { return .lookStraight }
 
         return .ready
     }

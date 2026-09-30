@@ -14,6 +14,8 @@ public enum FaceVerificationError: Error, Equatable {
     case cameraPermissionDenied
     case cameraUnavailable
     case timeout
+    /// A liveness prompt was not completed within `challengeTimeout`.
+    case livenessFailed
     /// The `verify` closure returned `false`.
     case rejected
     /// The `verify` closure threw.
@@ -24,6 +26,7 @@ public enum FaceVerificationError: Error, Equatable {
         case (.cameraPermissionDenied, .cameraPermissionDenied),
              (.cameraUnavailable, .cameraUnavailable),
              (.timeout, .timeout),
+             (.livenessFailed, .livenessFailed),
              (.rejected, .rejected):
             return true
         case let (.verificationFailed(a), .verificationFailed(b)):
@@ -71,7 +74,7 @@ public struct FaceVerificationView: View {
     ) {
         _viewModel = StateObject(wrappedValue: VerificationViewModel(
             config: config,
-            camera: CameraSession(position: config.cameraPosition, detectLandmarks: config.requireBlink),
+            camera: CameraSession(position: config.cameraPosition, detectLandmarks: config.effectiveChallenges.contains(.blink)),
             verify: verify,
             onFinish: onFinish
         ))

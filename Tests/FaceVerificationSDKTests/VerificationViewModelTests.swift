@@ -38,15 +38,28 @@ final class VerificationViewModelTests: XCTestCase {
         results = []
     }
 
-    private func makeViewModel(requireBlink: Bool = false, verify: FaceVerifier? = nil) -> VerificationViewModel {
+    private let left = 0.5 * ChallengeTracker.userLeftYawSign
+    private let up = 0.4 * ChallengeTracker.lookUpPitchSign
+
+    private func makeViewModel(requireBlink: Bool = false, challenges: [LivenessChallenge] = [],
+                               verify: FaceVerifier? = nil) -> VerificationViewModel {
         var config = FaceVerificationConfig()
         config.requireBlink = requireBlink
+        config.challenges = challenges
+        config.challengeTimeout = 8
         config.minimumProcessingDuration = 0
         config.stabilityDuration = 1
         config.timeout = 10
         return VerificationViewModel(config: config, camera: camera, verify: verify) { [weak self] in
             self?.results.append($0)
         }
+    }
+
+    private func turned(yaw: Double = 0, pitch: Double = 0) -> FaceObservation {
+        var face = goodFace
+        face.yaw = yaw
+        face.pitch = pitch
+        return face
     }
 
     private func face(eyes: Double) -> FaceObservation {
@@ -146,18 +159,78 @@ final class VerificationViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state, .failure(.timeout))
     }
 
-    func testBlinkRequiredBeforeCapture() async {
+    func testRequireBlinkRunsBlinkChallengeThenCapturesCentered() async {
         let vm = makeViewModel(requireBlink: true)
         await vm.start()
-        for (i, eyes) in [0.3, 0.3, 0.3, 0.3].enumerated() {
-            camera.send([face(eyes: eyes)], at: Double(i) * 0.5)
-        }
-        XCTAssertEqual(vm.state, .positioning(.blink)) // stable 1.5s but no blink yet
+        camera.send([face(eyes: 0.3)], at: 0)
+        camera.send([face(eyes: 0.3)], at: 1.0)
+        XCTAssertEqual(vm.state, .challenge(.blink, step: 1, total: 1))
 
-        camera.send([face(eyes: 0.1)], at: 2.0)
-        XCTAssertEqual(vm.state, .positioning(.blink))
-        camera.send([face(eyes: 0.3)], at: 2.1)
+        [0.3, 0.3, 0.3, 0.1].enumerated().forEach { camera.send([face(eyes: $1)], at: 1.1 + Double($0) * 0.1) }
+        XCTAssertEqual(vm.state, .challenge(.blink, step: 1, total: 1))
+        camera.send([face(eyes: 0.3)], at: 1.6)
+        XCTAssertEqual(vm.state, .positioning(.lookStraight))
+
+        camera.send([face(eyes: 0.3)], at: 1.7)
+        XCTAssertEqual(vm.state, .positioning(.ready))
+        camera.send([face(eyes: 0.3)], at: 2.8)
         XCTAssertEqual(vm.state, .processing)
+    }
+
+    func testChallengesRunInOrder() async {
+        let vm = makeViewModel(challenges: [.turnLeft, .turnRight, .lookUp, .lookDown])
+        await vm.start()
+        camera.send([goodFace], at: 0)
+        camera.send([goodFace], at: 1.0)
+        XCTAssertEqual(vm.state, .challenge(.turnLeft, step: 1, total: 4))
+
+        camera.send([turned(yaw: -left)], at: 1.2) // right first: ignored
+        XCTAssertEqual(vm.state, .challenge(.turnLeft, step: 1, total: 4))
+        camera.send([turned(yaw: left)], at: 1.4)
+        XCTAssertEqual(vm.state, .challenge(.turnRight, step: 2, total: 4))
+
+        camera.send([goodFace], at: 1.6)
+        camera.send([turned(yaw: -left)], at: 1.8)
+        XCTAssertEqual(vm.state, .challenge(.lookUp, step: 3, total: 4))
+
+        camera.send([goodFace], at: 2.0)
+        camera.send([turned(pitch: up)], at: 2.2)
+        XCTAssertEqual(vm.state, .challenge(.lookDown, step: 4, total: 4))
+
+        camera.send([goodFace], at: 2.4)
+        camera.send([turned(pitch: -up)], at: 2.6)
+        XCTAssertEqual(vm.state, .positioning(.lookStraight))
+
+        camera.send([goodFace], at: 2.8)
+        camera.send([goodFace], at: 3.9)
+        XCTAssertEqual(vm.state, .processing)
+        await waitForState(vm, .success)
+    }
+
+    func testLosingFaceDuringChallengesRestartsFromPositioning() async {
+        let vm = makeViewModel(challenges: [.turnLeft, .turnRight])
+        await vm.start()
+        camera.send([goodFace], at: 0)
+        camera.send([goodFace], at: 1.0)
+        camera.send([turned(yaw: left)], at: 1.2)
+        XCTAssertEqual(vm.state, .challenge(.turnRight, step: 2, total: 2))
+
+        camera.send([], at: 1.4)
+        XCTAssertEqual(vm.state, .positioning(.noFace))
+        camera.send([goodFace], at: 1.6)
+        camera.send([goodFace], at: 2.6)
+        XCTAssertEqual(vm.state, .challenge(.turnLeft, step: 1, total: 2))
+    }
+
+    func testChallengeTimeoutFailsWithLivenessFailed() async {
+        let vm = makeViewModel(challenges: [.turnLeft])
+        await vm.start()
+        camera.send([goodFace], at: 0)
+        camera.send([goodFace], at: 1.0)
+        camera.send([goodFace], at: 5.0)
+        XCTAssertEqual(vm.state, .challenge(.turnLeft, step: 1, total: 1))
+        camera.send([goodFace], at: 9.1)
+        XCTAssertEqual(vm.state, .failure(.livenessFailed))
     }
 
     func testCancelReportsCancelledOnce() async {

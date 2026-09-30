@@ -3,8 +3,15 @@ import SwiftUI
 
 /// Configuration for the face verification flow. All values have sensible defaults.
 public struct FaceVerificationConfig {
-    /// Require the user to blink once before capture (simple liveness check).
+    /// Active liveness prompts, performed one after another in this order.
+    /// Empty = no liveness check.
+    public var challenges: [LivenessChallenge] = []
+    /// Seconds allowed for each liveness prompt before failing with `.livenessFailed`.
+    public var challengeTimeout: TimeInterval = 8
+    /// Shorthand for adding `.blink` to `challenges`.
     public var requireBlink = false
+    /// Shows head angles and eye openness on screen, for tuning on a device.
+    public var showsDebugInfo = false
     /// Seconds allowed in the positioning state before failing with `.timeout`.
     public var timeout: TimeInterval = 30
     /// Seconds the face must stay correctly positioned before capture.
@@ -16,6 +23,11 @@ public struct FaceVerificationConfig {
     public var theme = Theme()
 
     public init() {}
+
+    /// `challenges`, plus `.blink` at the end when `requireBlink` is set and it isn't listed.
+    var effectiveChallenges: [LivenessChallenge] {
+        requireBlink && !challenges.contains(.blink) ? challenges + [.blink] : challenges
+    }
 
     public struct Strings {
         public var navigationTitle = "Face recognition"
@@ -34,8 +46,15 @@ public struct FaceVerificationConfig {
         public var hintMoveBack = "Move back a little"
         public var hintCenterFace = "Center your face in the circle"
         public var hintLookStraight = "Look straight at the camera"
-        public var hintBlink = "Blink your eyes"
         public var hintReady = "Hold still"
+
+        public var challengeTurnLeft = "Turn your head left"
+        public var challengeTurnRight = "Turn your head right"
+        public var challengeLookUp = "Look up"
+        public var challengeLookDown = "Look down"
+        public var challengeBlink = "Blink your eyes"
+        /// Progress under a liveness prompt, e.g. "Step 2 of 5".
+        public var challengeStepFormat = "Step %d of %d"
 
         public init() {}
 
@@ -47,8 +66,17 @@ public struct FaceVerificationConfig {
             case .moveBack: return hintMoveBack
             case .centerFace: return hintCenterFace
             case .lookStraight: return hintLookStraight
-            case .blink: return hintBlink
             case .ready: return hintReady
+            }
+        }
+
+        func text(for challenge: LivenessChallenge) -> String {
+            switch challenge {
+            case .turnLeft: return challengeTurnLeft
+            case .turnRight: return challengeTurnRight
+            case .lookUp: return challengeLookUp
+            case .lookDown: return challengeLookDown
+            case .blink: return challengeBlink
             }
         }
     }
