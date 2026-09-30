@@ -1,3 +1,0 @@
-module FaceVerificationSDK {
-    header "/Volumes/Sinbad/dev/iOS/BnSApp/ios-face-verification-sdk/.build/index-build/arm64-apple-macosx/debug/FaceVerificationSDK.build/include/FaceVerificationSDK-Swift.h"
-}
