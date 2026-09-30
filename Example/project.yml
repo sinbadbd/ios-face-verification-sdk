@@ -1,0 +1,33 @@
+name: FaceVerificationDemo
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "15.0"
+packages:
+  FaceVerificationSDK:
+    path: ..
+targets:
+  FaceVerificationDemo:
+    type: application
+    platform: iOS
+    sources: [FaceVerificationDemo]
+    dependencies:
+      - package: FaceVerificationSDK
+    info:
+      path: FaceVerificationDemo/Info.plist
+      properties:
+        CFBundleDisplayName: Face Demo
+        NSCameraUsageDescription: The camera is used to scan your face for verification.
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.FaceVerificationDemo
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
